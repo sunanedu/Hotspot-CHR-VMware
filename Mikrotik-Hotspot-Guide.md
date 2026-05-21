@@ -6,7 +6,7 @@
 > **ระบบปฏิบัติการ Client:** Windows 7  
 > **Radius Server:** Ubuntu 22.04 LTS
 
-![diagram-network.png](network diagram)
+![network diagram](diagram-network.png)
 
 ---
 
@@ -582,7 +582,7 @@ http://172.16.0.1/login
 - หรือรอ Session หมดอายุ
 
 
-![hotspot-diagram.png](hotspot diagram)
+![hotspot diagram](hotspot-diagram.png)
 
 ---
 
@@ -969,7 +969,7 @@ Login เริ่มต้น:
 4. Mikrotik อนุญาตให้ผู้ใช้เข้าอินเทอร์เน็ต
 5. ดู Log และสถิติผ่าน daloRADIUS Web Interface
 
-![aaa.png](AAA Server)
+![AAA Server](aaa.png)
 
 ---
 
