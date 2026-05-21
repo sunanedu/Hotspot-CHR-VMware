@@ -300,7 +300,9 @@ ping 192.168.100.1
 ดาวน์โหลดจากเว็บ Mikrotik:
 
 ```
-https://mikrotik.com/download
+https://download.mikrotik.com/routeros/winbox/3.43/winbox64.exe
+
+https://bit.ly/4eZZsaE
 ```
 
 เลือก **Winbox** (เวอร์ชันล่าสุด) → ดาวน์โหลดไฟล์ `winbox64.exe` หรือ `winbox.exe`
