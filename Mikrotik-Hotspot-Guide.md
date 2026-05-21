@@ -6,6 +6,8 @@
 > **ระบบปฏิบัติการ Client:** Windows 7  
 > **Radius Server:** Ubuntu 22.04 LTS
 
+![diagram-network.png](network diagram)
+
 ---
 
 ## สารบัญ
@@ -579,6 +581,9 @@ http://172.16.0.1/login
 - เปิด Browser พิมพ์: `http://it.wifi/logout`
 - หรือรอ Session หมดอายุ
 
+
+![hotspot-diagram.png](hotspot diagram)
+
 ---
 
 ## 10. การปรับแต่งระบบของ Hotspot ของ Mikrotik
@@ -963,6 +968,8 @@ Login เริ่มต้น:
 3. FreeRADIUS ตรวจสอบข้อมูลใน MySQL → ส่ง Access-Accept กลับ
 4. Mikrotik อนุญาตให้ผู้ใช้เข้าอินเทอร์เน็ต
 5. ดู Log และสถิติผ่าน daloRADIUS Web Interface
+
+![aaa.png](AAA Server)
 
 ---
 
