@@ -99,8 +99,8 @@ chr-7.21.4.vmdk
 
 **ขั้นที่ 6: ตั้งค่า Network**
 
-12. Network type: เลือก **Use bridged networking** → **Next**  
-    *(จะเพิ่ม NIC เพิ่มเติมภายหลัง)*
+12. Network type: เลือก **Use network address translation (NAT)** → **Next**  
+    *(NIC แรก = ether1 รับ IP จาก DHCP ของ VMware NAT บน Host)*
 
 **ขั้นที่ 7: ตั้งค่า Disk Controller และ Disk**
 
@@ -119,8 +119,8 @@ chr-7.21.4.vmdk
 
 1. คลิกขวาที่ VM `Mikrotik-CHR` → **Settings**
 2. คลิก **Add** → เลือก **Network Adapter** → **Finish**
-3. ตั้งค่า NIC ที่ 1: **Bridged** (เชื่อมต่ออินเทอร์เน็ต)
-4. ตั้งค่า NIC ที่ 2: **Host-only** หรือ **Custom: VMnet2** (สำหรับ LAN/Hotspot)
+3. ตั้งค่า NIC ที่ 1: **NAT** (ether1 — รับ IP อัตโนมัติจาก DHCP ของ NAT บน Host)
+4. ตั้งค่า NIC ที่ 2: **Host-only** หรือ **Custom: VMnet2** (ether2 — วง LAN Hotspot)
 
 ---
 
@@ -165,13 +165,23 @@ Flags: D - dynamic, X - disabled, R - running, S - slave
  1 R ether2    ether         1500
 ```
 
-### ตั้งค่า IP Address เบื้องต้น (ether1 สำหรับ WAN)
+### ตั้งค่า ether1 รับ IP อัตโนมัติ (DHCP จาก NAT ของ Host)
+
+เมื่อ VMware ตั้ง NIC แรกเป็น **NAT** แล้ว ให้เปิด DHCP Client บน **ether1**:
 
 ```
-[admin@MikroTik] > /ip address add address=192.168.1.2/24 interface=ether1 network=192.168.1.0
-[admin@MikroTik] > /ip route add gateway=192.168.1.1
-[admin@MikroTik] > /ip dns set servers=8.8.8.8,8.8.4.4
+[admin@MikroTik] > /ip dhcp-client add interface=ether1 disabled=no use-peer-dns=yes use-peer-ntp=yes add-default-route=yes
 ```
+
+ตรวจสอบว่าได้รับ IP และ Gateway แล้ว:
+
+```
+[admin@MikroTik] > /ip dhcp-client print
+[admin@MikroTik] > /ip address print where interface=ether1
+[admin@MikroTik] > /ip route print
+```
+
+> **หมายเหตุ:** ไม่ต้องตั้ง IP หรือ Default Gateway แบบ Static บน ether1 — VMware NAT จะแจก DHCP ให้ Router โดยอัตโนมัติ
 
 ### ทดสอบการเชื่อมต่ออินเทอร์เน็ต
 
@@ -225,11 +235,14 @@ Flags: D - dynamic, X - disabled, R - running, S - slave
 ### แผนผัง Network
 
 ```
-[อินเทอร์เน็ต]
+[อินเทอร์เน็ต / Host]
       |
-   [ether1 - Bridged]
+   [VMware NAT — DHCP]
+      |
+   [ether1 - DHCP Client]
    [Mikrotik CHR]
-   [ether2 - VMnet2]
+   [bridge-hotspot ← ether2 - VMnet2]
+   172.16.0.1/24
       |
 [Windows 7 Client]
   (VMnet2)
@@ -239,9 +252,9 @@ Flags: D - dynamic, X - disabled, R - running, S - slave
 
 1. เปิด **VMware Workstation** → **Edit** → **Virtual Network Editor**
 2. เลือก **VMnet2** → ตั้งค่าเป็น **Host-only**
-3. Subnet IP: `192.168.100.0`
+3. Subnet IP: `172.16.0.0`
 4. Subnet mask: `255.255.255.0`
-5. **ปิด** DHCP ของ VMnet2 (เพราะ Mikrotik จะทำหน้าที่ DHCP แทน)
+5. **ปิด** DHCP ของ VMnet2 (เพราะ Mikrotik Hotspot จะทำหน้าที่ DHCP แทน)
 6. คลิก **Apply** → **OK**
 
 ### ตั้งค่า Network Adapter ของ VM แต่ละเครื่อง
@@ -250,8 +263,8 @@ Flags: D - dynamic, X - disabled, R - running, S - slave
 
 | NIC | VMware Network | Mikrotik Interface | บทบาท |
 |-----|---------------|-------------------|-------|
-| NIC 1 | Bridged | ether1 | WAN (อินเทอร์เน็ต) |
-| NIC 2 | VMnet2 | ether2 | LAN (Hotspot) |
+| NIC 1 | NAT | ether1 | WAN — รับ IP จาก DHCP ของ Host NAT |
+| NIC 2 | VMnet2 | ether2 | LAN — อยู่ใน bridge-hotspot (Hotspot) |
 
 **Windows 7 Client:**
 
@@ -269,9 +282,9 @@ Flags: D - dynamic, X - disabled, R - running, S - slave
 4. เลือก **Use the following IP address:**
 
 ```
-IP address:      192.168.100.10
+IP address:      172.16.0.10
 Subnet mask:     255.255.255.0
-Default gateway: 192.168.100.1
+Default gateway: 172.16.0.1
 DNS:             8.8.8.8
 ```
 
@@ -282,7 +295,7 @@ DNS:             8.8.8.8
 เปิด Command Prompt บน Windows 7:
 
 ```cmd
-ping 192.168.100.1
+ping 172.16.0.1
 ```
 
 ถ้า Reply กลับมา แสดงว่าเชื่อมต่อสำเร็จ
@@ -313,7 +326,7 @@ https://bit.ly/4eZZsaE
 
 1. รันไฟล์ `winbox64.exe` บน **Windows 7 (VM)**
 2. ในช่อง **Connect To** ใส่:
-   - IP Address: `192.168.100.1`  
+   - IP Address: `172.16.0.1`  
    หรือใช้ MAC Address (คลิกปุ่ม `...` เพื่อ Scan หา Mikrotik ในวง LAN)
 3. Login: `admin`
 4. Password: รหัสผ่านที่ตั้งไว้
@@ -341,6 +354,8 @@ https://bit.ly/4eZZsaE
 ## 7. Mikrotik CHR ตั้งค่า Bridge Network
 
 ### ทำไมต้องใช้ Bridge?
+
+สร้าง **`bridge-hotspot`** แล้วผูก **`ether2`** (NIC ที่เชื่อม VMnet2 / Client) เข้า Bridge — Hotspot และ DHCP จะทำงานบน Bridge นี้ โดย WAN ออกอินเทอร์เน็ตผ่าน **`ether1`** ที่รับ IP จาก DHCP ของ VMware NAT
 
 Bridge ช่วยให้ Interface หลายตัวทำงานเป็น Switch Layer 2 เดียวกัน เหมาะสำหรับการสร้าง Hotspot ที่ต้องการรวม Interface LAN หลายพอร์ตเข้าด้วยกัน
 
@@ -370,7 +385,8 @@ Bridge ช่วยให้ Interface หลายตัวทำงานเ�
 ### กำหนด IP ให้ Bridge
 
 ```
-/ip address add address=192.168.100.1/24 interface=bridge-hotspot network=192.168.100.0
+/ip address add address=172.16.0.1/24 interface=bridge-hotspot network=172.16.0.0
+/ip dns set servers=8.8.8.8 allow-remote-requests=yes
 ```
 
 > หากมี IP เดิมบน ether2 ให้ลบออกก่อน:
@@ -398,6 +414,16 @@ Bridge ช่วยให้ Interface หลายตัวทำงานเ�
 
 ## 8. การตั้งค่า Hotspot ของ VM Mikrotik CHR
 
+### สรุปค่าที่ใช้ในคู่มือนี้
+
+| รายการ | ค่า |
+|--------|-----|
+| Interface Hotspot | `bridge-hotspot` (รวม `ether2`) |
+| IP วง Hotspot | `172.16.0.1/24` |
+| DNS | `8.8.8.8` |
+| DNS Name / URL | `it.wifi` |
+| WAN | `ether1` — DHCP Client จาก VMware NAT |
+
 ### Hotspot คืออะไร?
 
 **Hotspot** ใน Mikrotik คือระบบ Captive Portal ที่บังคับให้ผู้ใช้ Login ก่อนใช้งานอินเทอร์เน็ต พร้อมระบบจัดการ User, การจำกัด Bandwidth และ Session
@@ -420,7 +446,7 @@ Hotspot Interface: bridge-hotspot
 **ขั้นที่ 2: IP ของ Hotspot**
 
 ```
-Local Address of Network: 192.168.100.1/24
+Local Address of Network: 172.16.0.1/24
 Masquerade Network: ✓ (ติ๊กถูก)
 ```
 
@@ -429,7 +455,7 @@ Masquerade Network: ✓ (ติ๊กถูก)
 **ขั้นที่ 3: Address Pool (DHCP)**
 
 ```
-Address Pool of Network: 192.168.100.2 - 192.168.100.254
+Address Pool of Network: 172.16.0.2 - 172.16.0.254
 ```
 
 คลิก **Next**
@@ -453,8 +479,8 @@ IP Address of SMTP Server: 0.0.0.0 (ปล่อยว่าง)
 **ขั้นที่ 6: DNS**
 
 ```
-DNS Servers: 8.8.8.8, 8.8.4.4
-DNS Name: hotspot.local (ชื่อ DNS ของ Hotspot)
+DNS Servers: 8.8.8.8
+DNS Name: it.wifi (ชื่อ DNS / URL ของ Hotspot)
 ```
 
 คลิก **Next**
@@ -485,9 +511,9 @@ Password: admin123
 ### ตั้งค่า DHCP Server (ถ้า Wizard ไม่สร้างให้)
 
 ```
-/ip pool add name=hotspot-pool ranges=192.168.100.2-192.168.100.254
+/ip pool add name=hotspot-pool ranges=172.16.0.2-172.16.0.254
 /ip dhcp-server add name=hotspot-dhcp interface=bridge-hotspot address-pool=hotspot-pool disabled=no
-/ip dhcp-server network add address=192.168.100.0/24 gateway=192.168.100.1 dns-server=8.8.8.8
+/ip dhcp-server network add address=172.16.0.0/24 gateway=172.16.0.1 dns-server=8.8.8.8
 ```
 
 ---
@@ -511,12 +537,12 @@ Password: admin123
 ipconfig /all
 ```
 
-ควรได้รับ IP ในช่วง `192.168.100.2 - 192.168.100.254`
+ควรได้รับ IP ในช่วง `172.16.0.2 - 172.16.0.254`
 
 ### ทดสอบ Ping
 
 ```cmd
-ping 192.168.100.1
+ping 172.16.0.1
 ping 8.8.8.8
 ```
 
@@ -527,9 +553,9 @@ ping 8.8.8.8
 3. ระบบจะ Redirect ไปยังหน้า Login ของ Hotspot:
 
 ```
-http://hotspot.local/login
+http://it.wifi/login
 หรือ
-http://192.168.100.1/login
+http://172.16.0.1/login
 ```
 
 4. ใส่ข้อมูล Login:
@@ -550,7 +576,7 @@ http://192.168.100.1/login
 ### Logout
 
 ผู้ใช้สามารถ Logout ได้โดย:
-- เปิด Browser พิมพ์: `http://hotspot.local/logout`
+- เปิด Browser พิมพ์: `http://it.wifi/logout`
 - หรือรอ Session หมดอายุ
 
 ---
@@ -594,7 +620,7 @@ Shared Users:       1
 **ดาวน์โหลดไฟล์ผ่าน FTP:**
 
 1. เปิด FTP Client เช่น **FileZilla** บน Windows 7
-2. เชื่อมต่อไปที่: `192.168.100.1` port `21`
+2. เชื่อมต่อไปที่: `172.16.0.1` port `21`
 3. Login ด้วย `admin` และรหัสผ่าน
 4. ไปที่โฟลเดอร์ `/hotspot/`
 5. ดาวน์โหลดไฟล์ `login.html`
@@ -630,7 +656,7 @@ $(link-logout) - URL สำหรับ Logout
 ### ตั้งค่า Advertisement (โฆษณา)
 
 ```
-/ip hotspot user profile set [find name=guest] advertise=yes advertise-url=http://192.168.100.1/ads.html
+/ip hotspot user profile set [find name=guest] advertise=yes advertise-url=http://172.16.0.1/ads.html
 ```
 
 ### กำหนด Session Limit ด้วย Time-based Policy
@@ -678,7 +704,7 @@ $(link-logout) - URL สำหรับ Logout
 2. RAM: `1024 MB`, Disk: `20 GB`
 3. Network: **VMnet2** (วงเดียวกับ Mikrotik LAN)
 4. ติดตั้ง Ubuntu 22.04 LTS Server
-5. ตั้ง IP แบบ Static: `192.168.100.200/24`, Gateway: `192.168.100.1`
+5. ตั้ง IP แบบ Static: `172.16.0.200/24`, Gateway: `172.16.0.1`
 
 ### ติดตั้ง FreeRADIUS และ MySQL บน Ubuntu
 
@@ -786,7 +812,7 @@ sudo nano /etc/freeradius/3.0/clients.conf
 
 ```
 client mikrotik-hotspot {
-    ipaddr          = 192.168.100.1
+    ipaddr          = 172.16.0.1
     secret          = radiussecret123
     shortname       = mikrotik
     nastype         = other
@@ -842,7 +868,7 @@ Received Access-Accept Id 0 from 127.0.0.1:1812 to 0.0.0.0:0 length 20
 **เพิ่ม RADIUS Server:**
 
 ```
-/radius add service=hotspot address=192.168.100.200 secret=radiussecret123 authentication-port=1812 accounting-port=1813
+/radius add service=hotspot address=172.16.0.200 secret=radiussecret123 authentication-port=1812 accounting-port=1813
 ```
 
 **ตั้งค่า Hotspot ให้ใช้ RADIUS:**
@@ -923,7 +949,7 @@ sudo systemctl restart apache2
 เปิด Browser บน Windows 7:
 
 ```
-http://192.168.100.200/daloradius/app/users/
+http://172.16.0.200/daloradius/app/users/
 ```
 
 Login เริ่มต้น:
