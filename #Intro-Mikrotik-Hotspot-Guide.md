@@ -4,7 +4,7 @@
 > **RouterOS:** 7.21.4  
 > **สภาพแวดล้อม:** VMware Workstation / VMware Player  
 > **ระบบปฏิบัติการ Client:** Windows 7  
-> **Radius Server:** Ubuntu 22.04 LTS
+> **Radius Server:** Ubuntu 24.04 LTS (LAMP: Apache + MariaDB + PHP + phpMyAdmin)
 
 ![network diagram](diagram-network.png)
 
@@ -22,7 +22,7 @@
 8. [การตั้งค่า Hotspot ของ VM Mikrotik CHR](#8-การตั้งค่า-hotspot-ของ-vm-mikrotik-chr)
 9. [VM Windows 7 กับการเข้าใช้งานบริการ Hotspot](#9-vm-windows-7-กับการเข้าใช้งานบริการ-hotspot)
 10. [การปรับแต่งระบบของ Hotspot ของ Mikrotik](#10-การปรับแต่งระบบของ-hotspot-ของ-mikrotik)
-11. [การใช้งาน Radius Server เป็น Linux Ubuntu 22.04](#11-การใช้งาน-radius-server-เป็น-linux-ubuntu-2204)
+11. [การใช้งาน Radius Server บน Linux Ubuntu 24.04 (LAMP + FreeRADIUS)](#11-การใช้งาน-radius-server-บน-linux-ubuntu-2404-lamp--freeradius)
 
 ---
 
@@ -685,7 +685,7 @@ $(link-logout) - URL สำหรับ Logout
 
 ---
 
-## 11. การใช้งาน Radius Server เป็น Linux Ubuntu 22.04
+## 11. การใช้งาน Radius Server บน Linux Ubuntu 24.04 (LAMP + FreeRADIUS)
 
 ### Radius คืออะไร?
 
@@ -697,33 +697,229 @@ $(link-logout) - URL สำหรับ Logout
 [Windows 7 Client]
        |
 [Mikrotik CHR Hotspot]
-       |  (RADIUS Request: port 1812)
-[Ubuntu 22.04 - FreeRADIUS Server]
+       |  (RADIUS Request: port 1812/1813)
+[Ubuntu 24.04 - FreeRADIUS Server]
        |
-[MySQL Database - เก็บข้อมูล User]
+[MariaDB Database - เก็บข้อมูล User]
+       |
+[phpMyAdmin - จัดการฐานข้อมูลผ่านเว็บ]
 ```
 
-### ติดตั้ง Ubuntu 22.04 VM
+> **หมายเหตุสำคัญ:** คู่มือรุ่นก่อนหน้าอ้างอิงถึง MySQL และข้ามขั้นตอนการติดตั้ง LAMP ไปตั้งค่า FreeRADIUS ทันที ทำให้เกิดปัญหา service หา library ไม่เจอ, ต่อฐานข้อมูลไม่ได้ และไม่มี Password ตั้งไว้ตั้งแต่ต้น ในคู่มือฉบับนี้จึงเปลี่ยนมาใช้ **MariaDB** (ใช้งานง่ายกว่า มี Community เยอะ และเป็นฐานข้อมูลที่ Ubuntu ใช้เป็นค่าเริ่มต้น) พร้อมติดตั้ง **LAMP Stack ตามลำดับที่ถูกต้อง** (Linux → Apache → MariaDB → PHP → phpMyAdmin) และ **ตั้งรหัสผ่าน/บัญชีผู้ใช้ทุกบริการตั้งแต่ขั้นตอนแรกที่ติดตั้งเสร็จ** ก่อนจะไปต่อขั้นตอนถัดไป
 
-1. สร้าง VM ใน VMware สำหรับ Ubuntu Server 22.04
-2. RAM: `1024 MB`, Disk: `20 GB`
+### ลำดับขั้นตอนทั้งหมดของหัวข้อนี้
+
+| ลำดับ | ขั้นตอน |
+|-------|---------|
+| 1 | เตรียม VM Ubuntu 24.04 Server + ตั้ง IP Static |
+| 2 | อัปเดตระบบ |
+| 3 | ติดตั้ง **Apache** (A) |
+| 4 | ติดตั้ง **MariaDB** (M) + ตั้งรหัสผ่าน + Secure Installation |
+| 5 | ติดตั้ง **PHP** (P) + ทดสอบร่วมกับ Apache |
+| 6 | ติดตั้ง **phpMyAdmin** เพื่อจัดการฐานข้อมูลผ่านเว็บ |
+| 7 | ติดตั้ง **FreeRADIUS** และเชื่อมต่อกับ MariaDB |
+| 8 | สร้าง Database/User ของ Radius + Import Schema |
+| 9 | ตั้งค่า FreeRADIUS ให้ใช้ SQL Module |
+| 10 | เพิ่ม NAS Client (Mikrotik) และเพิ่ม User สำหรับทดสอบ |
+| 11 | ทดสอบ FreeRADIUS ด้วย `radtest` |
+| 12 | ตั้งค่า Mikrotik ให้ใช้ RADIUS |
+| 13 | (ทางเลือก) ติดตั้ง daloRADIUS เป็นหน้าเว็บจัดการ User |
+
+> **Reference ที่ใช้ในคู่มือส่วนนี้:**
+> - Apache บน Ubuntu 24.04: https://www.server-world.info/en/note?os=Ubuntu_24.04&p=httpd&f=1
+> - MariaDB บน Ubuntu 24.04 (ติดตั้ง): https://www.server-world.info/en/note?os=Ubuntu_24.04&p=mariadb&f=1
+> - MariaDB บน Ubuntu 24.04 (สร้าง User/สิทธิ์): https://www.server-world.info/en/note?os=Ubuntu_24.04&p=mariadb&f=6
+
+---
+
+### ขั้นตอนที่ 1: เตรียม VM Ubuntu Server 24.04
+
+1. สร้าง VM ใน VMware สำหรับ Ubuntu Server 24.04
+2. RAM: `1024 MB` ขึ้นไป (แนะนำ `2048 MB` ถ้าจะติดตั้ง daloRADIUS ด้วย), Disk: `20 GB`
 3. Network: **VMnet2** (วงเดียวกับ Mikrotik LAN)
-4. ติดตั้ง Ubuntu 22.04 LTS Server
-5. ตั้ง IP แบบ Static: `172.16.0.200/24`, Gateway: `172.16.0.1`
+4. ติดตั้ง Ubuntu 24.04 LTS Server (เลือกติดตั้งแบบ Minimal หรือ Standard ก็ได้ ไม่ต้องติดตั้ง GUI)
+5. ระหว่างติดตั้ง ให้สร้างผู้ใช้ระบบ (System User) พร้อมตั้งรหัสผ่านที่แข็งแกร่งทันที และเปิดใช้งาน **OpenSSH server** เพื่อจะได้ SSH เข้ามาตั้งค่าต่อได้สะดวก
+6. ตั้ง IP แบบ Static: `172.16.0.200/24`, Gateway: `172.16.0.1`, DNS: `8.8.8.8`
 
-### ติดตั้ง FreeRADIUS และ MySQL บน Ubuntu
-
-**อัปเดตระบบ:**
+### ขั้นตอนที่ 2: อัปเดตระบบก่อนติดตั้งอะไรทั้งสิ้น
 
 ```bash
 sudo apt update && sudo apt upgrade -y
 ```
 
-**ติดตั้ง FreeRADIUS และ MySQL:**
+> **สำคัญ:** ต้องรันคำสั่งนี้ก่อนติดตั้งแพ็กเกจอื่นทุกครั้ง เพื่อให้ได้เวอร์ชันแพ็กเกจล่าสุดและลดปัญหา Dependency ระหว่างติดตั้ง
+
+---
+
+### ขั้นตอนที่ 3: ติดตั้ง Apache (A ใน LAMP)
+
+**ติดตั้ง Apache2:**
 
 ```bash
-sudo apt install freeradius freeradius-mysql mysql-server -y
+sudo apt install apache2 -y
 ```
+
+**เปิดใช้งานและตรวจสอบสถานะ:**
+
+```bash
+sudo systemctl enable apache2
+sudo systemctl status apache2
+```
+
+**เปิด Firewall (ถ้าเปิด ufw อยู่):**
+
+```bash
+sudo ufw allow 'Apache Full'
+```
+
+**ทดสอบ Apache:**
+
+เปิด Browser บน Windows 7 แล้วเข้า `http://172.16.0.200` — ถ้าเห็นหน้า "Apache2 Default Page" แสดงว่าติดตั้งสำเร็จ
+
+---
+
+### ขั้นตอนที่ 4: ติดตั้ง MariaDB (M ใน LAMP) พร้อมตั้งรหัสผ่านทันที
+
+> นี่คือจุดที่คู่มือฉบับก่อนหน้าข้ามไป ทำให้ FreeRADIUS ต่อฐานข้อมูลไม่ได้ในภายหลัง ให้ทำตามลำดับนี้ให้ครบทุกขั้นตอนก่อนไปต่อ
+
+**ติดตั้ง MariaDB Server:**
+
+```bash
+sudo apt install mariadb-server mariadb-client -y
+```
+
+**เปิดใช้งานและตรวจสอบสถานะ:**
+
+```bash
+sudo systemctl enable mariadb
+sudo systemctl status mariadb
+```
+
+**ตั้งรหัสผ่านและปิดช่องโหว่เริ่มต้นด้วย `mysql_secure_installation` ทันที (ห้ามข้าม):**
+
+```bash
+sudo mysql_secure_installation
+```
+
+ระบบจะถามคำถามตามลำดับ ให้ตอบดังนี้:
+
+| คำถาม | คำตอบที่แนะนำ |
+|-------|----------------|
+| Enter current password for root | กด `Enter` (ยังไม่มีรหัสผ่าน) |
+| Switch to unix_socket authentication | `n` (จะได้ตั้งรหัสผ่าน root ใช้ล็อกอินได้) |
+| Change the root password | `Y` แล้วตั้งรหัสผ่านที่แข็งแกร่ง เช่น `MariaDB-R00t!Pass` |
+| Remove anonymous users | `Y` |
+| Disallow root login remotely | `Y` |
+| Remove test database | `Y` |
+| Reload privilege tables now | `Y` |
+
+**ทดสอบเข้า MariaDB ด้วยรหัสผ่านที่เพิ่งตั้ง:**
+
+```bash
+mysql -u root -p
+```
+
+```sql
+SHOW DATABASES;
+EXIT;
+```
+
+**สร้างบัญชีผู้ดูแลสำหรับใช้งานประจำวัน (ไม่ใช้ root โดยตรง):**
+
+```sql
+CREATE USER 'dbadmin'@'localhost' IDENTIFIED BY 'DbAdmin!Str0ng2026';
+GRANT ALL PRIVILEGES ON *.* TO 'dbadmin'@'localhost' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+EXIT;
+```
+
+> **คำแนะนำเรื่องรหัสผ่าน:** ทุกรหัสผ่านในคู่มือนี้เป็นตัวอย่างเท่านั้น ให้เปลี่ยนเป็นรหัสผ่านของจริงที่คาดเดายาก (ผสมตัวพิมพ์ใหญ่-เล็ก ตัวเลข อักขระพิเศษ ความยาวอย่างน้อย 12 ตัวอักษร) และจดบันทึกเก็บไว้ในที่ปลอดภัย
+
+---
+
+### ขั้นตอนที่ 5: ติดตั้ง PHP (P ใน LAMP)
+
+**ติดตั้ง PHP และโมดูลที่จำเป็นสำหรับ Apache, MariaDB และ phpMyAdmin:**
+
+```bash
+sudo apt install php libapache2-mod-php php-mysql php-mbstring php-zip php-gd php-json php-curl php-xml php-cli -y
+```
+
+**Restart Apache ให้โหลดโมดูล PHP:**
+
+```bash
+sudo systemctl restart apache2
+```
+
+**ทดสอบ PHP ทำงานร่วมกับ Apache:**
+
+```bash
+sudo nano /var/www/html/info.php
+```
+
+ใส่เนื้อหา:
+
+```php
+<?php
+phpinfo();
+?>
+```
+
+เปิด Browser ไปที่ `http://172.16.0.200/info.php` ถ้าเห็นหน้าข้อมูล PHP แสดงว่า LAMP (A+M+P) พร้อมใช้งานแล้ว
+
+> **เพื่อความปลอดภัย:** ลบไฟล์ทดสอบนี้ทิ้งหลังตรวจสอบเสร็จ เพราะ `phpinfo()` เปิดเผยรายละเอียดระบบที่ไม่ควรให้บุคคลภายนอกเห็น
+
+```bash
+sudo rm /var/www/html/info.php
+```
+
+---
+
+### ขั้นตอนที่ 6: ติดตั้ง phpMyAdmin
+
+**ติดตั้งผ่าน APT (ใช้ LAMP ที่เพิ่งติดตั้งไว้แล้ว):**
+
+```bash
+sudo apt install phpmyadmin -y
+```
+
+ระหว่างติดตั้งจะมีหน้าจอถามค่าตั้งค่า (dbconfig-common) ให้ตอบดังนี้:
+
+1. **Web server to configure:** เลื่อนไปเลือก `apache2` แล้วกด `SPACE` เพื่อติ๊กเลือก (ค่าเริ่มต้นจะไฮไลต์ไว้แต่ยังไม่ได้ติ๊ก ต้องกด SPACE เอง) จากนั้นกด `TAB` แล้ว `Enter`
+2. **Configure database for phpmyadmin with dbconfig-common?** เลือก `Yes`
+3. **MySQL application password for phpmyadmin:** ตั้งรหัสผ่านที่แข็งแกร่ง เช่น `PmaApp!Str0ng2026` แล้วยืนยันซ้ำอีกครั้ง
+
+**เปิดใช้งาน mbstring และ config ของ phpMyAdmin (เผื่อระบบยังไม่ได้เปิดอัตโนมัติ):**
+
+```bash
+sudo phpenmod mbstring
+sudo a2enconf phpmyadmin
+sudo systemctl restart apache2
+```
+
+**เข้าถึง phpMyAdmin:**
+
+เปิด Browser บน Windows 7 ไปที่:
+
+```
+http://172.16.0.200/phpmyadmin
+```
+
+Login ด้วยบัญชี `dbadmin` ที่สร้างไว้ในขั้นตอนที่ 4 (หรือ `root` พร้อมรหัสผ่านที่ตั้งไว้)
+
+> **คำแนะนำด้านความปลอดภัย:** phpMyAdmin เป็นเป้าหมายที่มักถูกโจมตีบ่อย หากเปิดให้เข้าถึงข้ามเครือข่ายจริง (ไม่ใช่แค่ Lab) ควรเพิ่มการป้องกันอีกชั้นด้วย Apache Basic Auth (`.htaccess`) และเปิดใช้งาน HTTPS เสมอ
+
+---
+
+### ขั้นตอนที่ 7: ติดตั้ง FreeRADIUS และเชื่อมต่อกับ MariaDB
+
+**ติดตั้ง FreeRADIUS พร้อมโมดูลเชื่อมต่อ MySQL/MariaDB:**
+
+```bash
+sudo apt install freeradius freeradius-mysql freeradius-utils -y
+```
+
+> แพ็กเกจ `freeradius-mysql` ใช้ชื่อเดิมตามที่ Ubuntu ตั้งไว้ แต่ใช้งานร่วมกับ MariaDB ได้เต็มรูปแบบ เพราะ MariaDB เป็น Protocol-compatible กับ MySQL
 
 **ตรวจสอบสถานะ FreeRADIUS:**
 
@@ -731,31 +927,37 @@ sudo apt install freeradius freeradius-mysql mysql-server -y
 sudo systemctl status freeradius
 ```
 
-### ตั้งค่า MySQL
+---
 
-**เข้า MySQL:**
+### ขั้นตอนที่ 8: สร้าง Database/User ของ Radius และ Import Schema
+
+**สร้าง Database และ User เฉพาะสำหรับ Radius (ห้ามใช้ root):**
 
 ```bash
 sudo mysql -u root -p
 ```
 
-**สร้าง Database และ User:**
-
 ```sql
 CREATE DATABASE radius;
-CREATE USER 'radius'@'localhost' IDENTIFIED BY 'RadiusPass123';
+CREATE USER 'radius'@'localhost' IDENTIFIED BY 'RadiusDb!Str0ng2026';
 GRANT ALL PRIVILEGES ON radius.* TO 'radius'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 ```
 
-**นำเข้า Schema ของ FreeRADIUS:**
+**Import Schema ของ FreeRADIUS เข้าฐานข้อมูล `radius`:**
 
 ```bash
 sudo mysql -u root -p radius < /etc/freeradius/3.0/mods-config/sql/main/mysql/schema.sql
 ```
 
-### ตั้งค่า FreeRADIUS ให้ใช้ MySQL
+**ตรวจสอบว่า Import สำเร็จผ่าน phpMyAdmin:**
+
+เปิด `http://172.16.0.200/phpmyadmin` → Login ด้วย `radius` / `RadiusDb!Str0ng2026` → ควรเห็นตาราง `radcheck`, `radreply`, `radacct`, `nas` เป็นต้น ในฐานข้อมูล `radius`
+
+---
+
+### ขั้นตอนที่ 9: ตั้งค่า FreeRADIUS ให้ใช้ SQL Module (MariaDB)
 
 **เปิดใช้งาน SQL Module:**
 
@@ -769,7 +971,7 @@ sudo ln -s /etc/freeradius/3.0/mods-available/sql /etc/freeradius/3.0/mods-enabl
 sudo nano /etc/freeradius/3.0/mods-enabled/sql
 ```
 
-แก้ไขค่าต่อไปนี้:
+แก้ไขค่าต่อไปนี้ให้ตรงกับ Database ที่สร้างในขั้นตอนที่ 8:
 
 ```
 dialect = "mysql"
@@ -778,7 +980,7 @@ driver = "rlm_sql_mysql"
 server = "localhost"
 port = 3306
 login = "radius"
-password = "RadiusPass123"
+password = "RadiusDb!Str0ng2026"
 
 radius_db = "radius"
 ```
@@ -805,9 +1007,26 @@ accounting {
 }
 ```
 
-### เพิ่ม NAS Client (Mikrotik) ใน FreeRADIUS
+**ตรวจสอบว่า Config ไม่มี Syntax Error ก่อน Restart:**
 
-แก้ไขไฟล์ `/etc/freeradius/3.0/clients.conf`:
+```bash
+sudo freeradius -CX
+```
+
+ถ้าเห็นบรรทัดสุดท้ายว่า `Configuration appears to be OK` แสดงว่าพร้อมใช้งาน
+
+**Restart และเปิดใช้งานอัตโนมัติเมื่อบูตเครื่อง:**
+
+```bash
+sudo systemctl restart freeradius
+sudo systemctl enable freeradius
+```
+
+---
+
+### ขั้นตอนที่ 10: เพิ่ม NAS Client (Mikrotik) และเพิ่ม User สำหรับทดสอบ
+
+**เพิ่ม NAS Client ในไฟล์ `/etc/freeradius/3.0/clients.conf`:**
 
 ```bash
 sudo nano /etc/freeradius/3.0/clients.conf
@@ -818,27 +1037,31 @@ sudo nano /etc/freeradius/3.0/clients.conf
 ```
 client mikrotik-hotspot {
     ipaddr          = 172.16.0.1
-    secret          = radiussecret123
+    secret          = RadiusSecret!2026
     shortname       = mikrotik
     nastype         = other
 }
 ```
 
-### เพิ่ม User ใน Database
+**เพิ่ม User ผ่าน phpMyAdmin หรือผ่าน Terminal:**
+
+ผ่าน Terminal:
 
 ```bash
-sudo mysql -u radius -p radius
+mysql -u radius -p radius
 ```
 
 ```sql
 INSERT INTO radcheck (username, attribute, op, value)
-VALUES ('user01', 'Cleartext-Password', ':=', 'password01');
+VALUES ('user01', 'Cleartext-Password', ':=', 'UserOne!Pass2026');
 
 INSERT INTO radcheck (username, attribute, op, value)
-VALUES ('user02', 'Cleartext-Password', ':=', 'password02');
+VALUES ('user02', 'Cleartext-Password', ':=', 'UserTwo!Pass2026');
 
 EXIT;
 ```
+
+หรือผ่าน phpMyAdmin: เปิดฐานข้อมูล `radius` → ตาราง `radcheck` → แท็บ **Insert** → กรอกค่า `username`, `attribute = Cleartext-Password`, `op = :=`, `value = รหัสผ่าน`
 
 **ตั้งค่า Reply Attributes (Bandwidth Limit):**
 
@@ -847,17 +1070,12 @@ INSERT INTO radreply (username, attribute, op, value)
 VALUES ('user01', 'Mikrotik-Rate-Limit', '=', '2M/2M');
 ```
 
-### Restart และทดสอบ FreeRADIUS
+---
+
+### ขั้นตอนที่ 11: ทดสอบ FreeRADIUS ด้วย radtest
 
 ```bash
-sudo systemctl restart freeradius
-sudo systemctl enable freeradius
-```
-
-**ทดสอบด้วย radtest:**
-
-```bash
-radtest user01 password01 localhost 0 testing123
+radtest user01 UserOne!Pass2026 localhost 0 testing123
 ```
 
 ถ้าสำเร็จจะเห็น:
@@ -866,14 +1084,22 @@ radtest user01 password01 localhost 0 testing123
 Received Access-Accept Id 0 from 127.0.0.1:1812 to 0.0.0.0:0 length 20
 ```
 
-### ตั้งค่า Mikrotik ให้ใช้ RADIUS
+**ดู Log แบบ Real-time หากทดสอบไม่ผ่าน:**
+
+```bash
+sudo tail -f /var/log/freeradius/radius.log
+```
+
+---
+
+### ขั้นตอนที่ 12: ตั้งค่า Mikrotik ให้ใช้ RADIUS
 
 **ผ่าน Terminal ของ Mikrotik:**
 
 **เพิ่ม RADIUS Server:**
 
 ```
-/radius add service=hotspot address=172.16.0.200 secret=radiussecret123 authentication-port=1812 accounting-port=1813
+/radius add service=hotspot address=172.16.0.200 secret=RadiusSecret!2026 authentication-port=1812 accounting-port=1813
 ```
 
 **ตั้งค่า Hotspot ให้ใช้ RADIUS:**
@@ -903,13 +1129,19 @@ Received Access-Accept Id 0 from 127.0.0.1:1812 to 0.0.0.0:0 length 20
 sudo tail -f /var/log/freeradius/radius.log
 ```
 
-### ติดตั้ง daloRADIUS (Web Interface)
+---
 
-**ติดตั้ง Apache, PHP และ daloRADIUS:**
+### ขั้นตอนที่ 13 (ทางเลือก): ติดตั้ง daloRADIUS (Web Interface)
+
+> ขั้นตอนนี้ใช้ LAMP Stack ที่ติดตั้งไว้แล้วในขั้นตอนที่ 3-6 (Apache, MariaDB, PHP มีครบแล้ว จึงไม่ต้องติดตั้งซ้ำ)
+
+**ติดตั้งไลบรารีเพิ่มเติมที่ daloRADIUS ต้องใช้:**
 
 ```bash
-sudo apt install apache2 php php-mysql php-curl php-gd php-mbstring unzip -y
+sudo apt install unzip -y
 ```
+
+**ดาวน์โหลดและติดตั้ง daloRADIUS:**
 
 ```bash
 cd /tmp
@@ -918,7 +1150,7 @@ unzip master.zip
 sudo mv daloradius-master /var/www/html/daloradius
 ```
 
-**ตั้งค่า daloRADIUS:**
+**ตั้งค่า daloRADIUS ให้ต่อกับฐานข้อมูล `radius` ที่มีอยู่แล้ว:**
 
 ```bash
 cd /var/www/html/daloradius/app/common/includes/
@@ -926,22 +1158,22 @@ sudo cp daloradius.conf.php.sample daloradius.conf.php
 sudo nano daloradius.conf.php
 ```
 
-แก้ไขค่า:
+แก้ไขค่า (ใช้ User `radius` ที่สร้างไว้ในขั้นตอนที่ 8 ไม่ใช่ root):
 
 ```php
 $configValues['CONFIG_DB_HOST'] = 'localhost';
 $configValues['CONFIG_DB_USER'] = 'radius';
-$configValues['CONFIG_DB_PASS'] = 'RadiusPass123';
+$configValues['CONFIG_DB_PASS'] = 'RadiusDb!Str0ng2026';
 $configValues['CONFIG_DB_NAME'] = 'radius';
 ```
 
-**นำเข้า Tables ของ daloRADIUS:**
+**Import Tables เพิ่มเติมของ daloRADIUS เข้าฐานข้อมูลเดิม:**
 
 ```bash
 sudo mysql -u radius -p radius < /var/www/html/daloradius/contrib/db/fr2-mysql-daloradius-and-freeradius.sql
 ```
 
-**ตั้งสิทธิ์:**
+**ตั้งสิทธิ์ไฟล์ให้ Apache เข้าถึงได้:**
 
 ```bash
 sudo chown -R www-data:www-data /var/www/html/daloradius
@@ -957,22 +1189,25 @@ sudo systemctl restart apache2
 http://172.16.0.200/daloradius/app/users/
 ```
 
-Login เริ่มต้น:
+**Login เริ่มต้น (ต้องเปลี่ยนทันทีหลัง Login ครั้งแรก):**
 - Username: `administrator`
 - Password: `radius`
+
+> **คำเตือน:** รหัสผ่านเริ่มต้นของ daloRADIUS เป็นค่าที่รู้กันทั่วไปและไม่ปลอดภัย ให้เข้าไปเปลี่ยนรหัสผ่านผู้ดูแลระบบทันทีที่ Login ครั้งแรกได้ ก่อนจะสร้าง User หรือใช้งานจริงต่อ
+
+---
 
 ### สรุปการทดสอบระบบทั้งหมด
 
 1. Windows 7 เปิด Browser → ระบบ Redirect ไปหน้า Login Hotspot
 2. กรอก Username/Password → Mikrotik ส่ง RADIUS Request ไปยัง Ubuntu
-3. FreeRADIUS ตรวจสอบข้อมูลใน MySQL → ส่ง Access-Accept กลับ
+3. FreeRADIUS ตรวจสอบข้อมูลใน MariaDB → ส่ง Access-Accept กลับ
 4. Mikrotik อนุญาตให้ผู้ใช้เข้าอินเทอร์เน็ต
-5. ดู Log และสถิติผ่าน daloRADIUS Web Interface
+5. ดูข้อมูลผู้ใช้/แก้ไขได้ผ่าน phpMyAdmin หรือดู Log และสถิติผ่าน daloRADIUS Web Interface
 
 ![AAA Server](aaa.png)
 
 ---
-
 ## ภาคผนวก: คำสั่ง Mikrotik ที่ใช้บ่อย
 
 ```bash
@@ -1012,6 +1247,9 @@ Login เริ่มต้น:
 | Login แล้วไม่มีอินเทอร์เน็ต | NAT ไม่ทำงาน | ตรวจสอบ Masquerade Rule |
 | RADIUS ไม่ตอบสนอง | Firewall บน Ubuntu | `sudo ufw allow 1812,1813/udp` |
 | Winbox เชื่อมต่อไม่ได้ | Firewall Mikrotik | ตรวจสอบ `/ip firewall filter print` |
+| FreeRADIUS ต่อฐานข้อมูลไม่ได้ | ข้ามขั้นตอนติดตั้ง/ตั้งรหัสผ่าน MariaDB หรือรหัสผ่านในไฟล์ `sql` module ไม่ตรงกับที่สร้างไว้จริง | ทำตามขั้นตอนที่ 4, 8, 9 ให้ครบตามลำดับ แล้วตรวจสอบค่า `login`/`password` ในไฟล์ `/etc/freeradius/3.0/mods-enabled/sql` |
+| เข้า phpMyAdmin ไม่ได้ / ขึ้นหน้า 404 | ยังไม่ได้ `a2enconf phpmyadmin` หรือยังไม่ Restart Apache | `sudo a2enconf phpmyadmin && sudo systemctl restart apache2` |
+| `mysql_secure_installation` ไม่ขึ้นให้ตั้งรหัสผ่าน root | สลับไปใช้ unix_socket authentication (ตอบ `y` ในขั้นตอนนั้น) | ล็อกอินด้วย `sudo mysql` แล้วรัน `ALTER USER 'root'@'localhost' IDENTIFIED BY 'รหัสผ่านใหม่';` |
 
 ---
 
