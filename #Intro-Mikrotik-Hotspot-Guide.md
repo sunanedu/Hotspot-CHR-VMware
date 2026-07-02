@@ -971,7 +971,7 @@ sudo ln -s /etc/freeradius/3.0/mods-available/sql /etc/freeradius/3.0/mods-enabl
 sudo nano /etc/freeradius/3.0/mods-enabled/sql
 ```
 
-แก้ไขค่าต่อไปนี้ให้ตรงกับ Database ที่สร้างในขั้นตอนที่ 8:
+**(1) แก้ค่าเชื่อมต่อฐานข้อมูลให้ตรงกับที่สร้างในขั้นตอนที่ 8:**
 
 ```
 dialect = "mysql"
@@ -985,27 +985,57 @@ password = "RadiusDb!Str0ng2026"
 radius_db = "radius"
 ```
 
+**(2) ปิดบล็อก TLS ในส่วน `mysql { }` ของไฟล์เดียวกัน (จุดนี้พลาดบ่อยที่สุด):**
+
+> ไฟล์ต้นฉบับของ FreeRADIUS มีบล็อก `tls { }` เปิดใช้งานอยู่โดยค่าเริ่มต้น ซึ่งชี้ไปยังไฟล์ certificate ที่ไม่มีอยู่จริง (`/etc/ssl/certs/my_ca.crt`) ถ้าไม่ปิดส่วนนี้ก่อน `freeradius -CX` จะ error `Unable to check file "/etc/ssl/certs/my_ca.crt"` และ `Instantiation failed for module "sql"` ทันที
+
+กด `Ctrl+W` ใน nano แล้วค้นหาคำว่า `tls {` (จะอยู่ในส่วน `mysql { }` เหนือบรรทัด `warnings = auto`) แล้วเติม `#` หน้าทุกบรรทัดตั้งแต่ `tls {` จนถึง `}` ที่ปิดบล็อกนั้น ให้ได้ผลลัพธ์แบบนี้:
+
+```
+mysql {
+	# If any of the files below are set, TLS encryption is enabled
+	# tls {
+	#	ca_file = "/etc/ssl/certs/my_ca.crt"
+	#	ca_path = "/etc/ssl/certs/"
+	#	certificate_file = "/etc/ssl/certs/private/client.crt"
+	#	private_key_file = "/etc/ssl/certs/private/client.key"
+	#	cipher = "DHE-RSA-AES256-SHA:AES128-SHA"
+	#
+	#	tls_required = yes
+	#	tls_check_cert = no
+	#	tls_check_cert_cn = no
+	# }
+
+	warnings = auto
+}
+```
+
+> **ทางลัด:** แทนที่จะแก้ทีละบรรทัดใน nano สามารถใช้คำสั่งนี้เพื่อคอมเมนต์ทั้งบล็อกให้อัตโนมัติ แล้วค่อยเปิดไฟล์ตรวจซ้ำว่าคอมเมนต์ครบและไม่เกินขอบเขต:
+> ```bash
+> sudo sed -i '/tls {/,/^\s*}$/ s/^\([[:space:]]*\)/\1#/' /etc/freeradius/3.0/mods-enabled/sql
+> ```
+
 **แก้ไขไฟล์ `/etc/freeradius/3.0/sites-enabled/default`:**
 
-หา section `authorize` แล้วเพิ่มหรือ Uncomment:
+ไฟล์นี้มักมีบรรทัด `-sql` ซ่อนอยู่แล้วในส่วน `authorize { }`, `accounting { }` และ `post-auth { }` เพียงแต่ยังถูกคอมเมนต์ด้วย `#` อยู่ ให้ตรวจสอบก่อนว่ามีอยู่จริงกี่จุด:
 
-```
-authorize {
-    ...
-    sql
-    ...
-}
+```bash
+grep -n -- "-sql" /etc/freeradius/3.0/sites-enabled/default
 ```
 
-หา section `accounting` แล้วเพิ่ม:
+ถ้าพบบรรทัดที่ขึ้นต้นด้วย `#` (เช่น `# -sql` หรือ `#-sql`) ให้ลบ `#` ออกด้วยคำสั่งนี้ (แก้เฉพาะบรรทัดที่ตรงเงื่อนไข ไม่กระทบส่วนอื่น):
 
+```bash
+sudo sed -i -E '/^[[:space:]]*#+[[:space:]]*-sql/ s/#//' /etc/freeradius/3.0/sites-enabled/default
 ```
-accounting {
-    ...
-    sql
-    ...
-}
+
+ตรวจซ้ำว่า `-sql` ทุกจุดไม่มี `#` นำหน้าแล้ว:
+
+```bash
+grep -n -- "-sql" /etc/freeradius/3.0/sites-enabled/default
 ```
+
+> **ถ้าไม่พบบรรทัด `-sql` เลยในไฟล์** (บางเวอร์ชันไม่มีมาให้) ให้เปิดไฟล์ด้วย `sudo nano /etc/freeradius/3.0/sites-enabled/default` แล้วเพิ่มคำว่า `sql` เป็นบรรทัดใหม่เองภายใน section `authorize { }` และ `accounting { }` (วางไว้ตรงไหนใน section ก็ได้)
 
 **ตรวจสอบว่า Config ไม่มี Syntax Error ก่อน Restart:**
 
@@ -1013,7 +1043,7 @@ accounting {
 sudo freeradius -CX
 ```
 
-ถ้าเห็นบรรทัดสุดท้ายว่า `Configuration appears to be OK` แสดงว่าพร้อมใช้งาน
+ถ้าเห็นบรรทัดสุดท้ายว่า `Configuration appears to be OK` แสดงว่าพร้อมใช้งาน หากยัง error ให้อ่านชื่อไฟล์และเลขบรรทัดที่ error แจ้งไว้ แล้วกลับไปตรวจจุดนั้นอีกครั้ง
 
 **Restart และเปิดใช้งานอัตโนมัติเมื่อบูตเครื่อง:**
 
@@ -1250,6 +1280,7 @@ http://172.16.0.200/daloradius/app/users/
 | FreeRADIUS ต่อฐานข้อมูลไม่ได้ | ข้ามขั้นตอนติดตั้ง/ตั้งรหัสผ่าน MariaDB หรือรหัสผ่านในไฟล์ `sql` module ไม่ตรงกับที่สร้างไว้จริง | ทำตามขั้นตอนที่ 4, 8, 9 ให้ครบตามลำดับ แล้วตรวจสอบค่า `login`/`password` ในไฟล์ `/etc/freeradius/3.0/mods-enabled/sql` |
 | เข้า phpMyAdmin ไม่ได้ / ขึ้นหน้า 404 | ยังไม่ได้ `a2enconf phpmyadmin` หรือยังไม่ Restart Apache | `sudo a2enconf phpmyadmin && sudo systemctl restart apache2` |
 | `mysql_secure_installation` ไม่ขึ้นให้ตั้งรหัสผ่าน root | สลับไปใช้ unix_socket authentication (ตอบ `y` ในขั้นตอนนั้น) | ล็อกอินด้วย `sudo mysql` แล้วรัน `ALTER USER 'root'@'localhost' IDENTIFIED BY 'รหัสผ่านใหม่';` |
+| `freeradius -CX` error `Unable to check file ".../my_ca.crt"` และ `Instantiation failed for module "sql"` | บล็อก `tls { }` ในไฟล์ `mods-enabled/sql` เปิดใช้งานอยู่โดยค่าเริ่มต้น แต่ไฟล์ certificate ไม่มีอยู่จริง | คอมเมนต์ (`#`) ทุกบรรทัดในบล็อก `tls { }` ตามขั้นตอนที่ 9 |
 
 ---
 
